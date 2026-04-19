@@ -1,5 +1,5 @@
 {
-    "name": "shyntr-auth-portal",
+    "name": "shyntr-ee-auth-portal",
     "version": "1.1.0-alpha.1",
     "homepage": "./",
     "private": true,

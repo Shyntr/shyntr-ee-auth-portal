@@ -52,6 +52,7 @@
     "allow": "İzin Ver",
     "cancel": "İptal",
     "deny": "Reddet",
+    "requestedAudiences": "İstenen izleyiciler",
     "rememberDecision": "Bu kararı hatırla",
     "processing": "İşleniyor...",
     "scopes": {

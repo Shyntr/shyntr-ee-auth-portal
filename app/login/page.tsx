@@ -1,9 +1,9 @@
-import { getLoginSession, getLoginMethods } from '@/lib/shyntr-api';
+import { getLoginSession, getLoginMethods, getTenantPortalTheme } from '@/lib/shyntr-api';
 import { LoginForm } from '@/components/LoginForm';
 import { SessionExpired } from '@/components/SessionExpired';
 
 interface LoginPageProps {
-  searchParams: Promise<{ login_challenge?: string; tenant_id?: string }>;
+  searchParams: Promise<{ login_challenge?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -23,10 +23,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     return <SessionExpired />;
   }
 
-  const tenantName =
-    sessionRes.data.TenantID || methodsRes.data?.tenant_id || params.tenant_id || 'Shyntr';
+  const brandingTenantId = sessionRes.data.TenantID || methodsRes.data?.tenant_id || '';
+  const tenantName = brandingTenantId || 'Shyntr';
   const clientName = sessionRes.data.ClientID || 'Application';
   const methods = methodsRes.data?.methods || [];
+  const theme = await getTenantPortalTheme(brandingTenantId);
 
   return (
     <LoginForm
@@ -34,6 +35,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       tenantName={tenantName}
       clientName={clientName}
       methods={methods}
+      theme={theme}
     />
   );
 }

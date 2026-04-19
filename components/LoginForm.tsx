@@ -5,7 +5,8 @@ import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { handleLoginCancel, handleLoginSubmit } from '@/actions/auth';
-import { AuthMethod } from '@/lib/shyntr-api';
+import type { AuthMethod } from '@/lib/shyntr-api';
+import type { PortalTheme } from '@/lib/portal-theme';
 import { CardWrapper } from './CardWrapper';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,7 @@ interface LoginFormProps {
   tenantName: string;
   clientName: string;
   methods: AuthMethod[];
+  theme: PortalTheme;
 }
 
 export function LoginForm({
@@ -24,6 +26,7 @@ export function LoginForm({
   tenantName,
   clientName,
   methods,
+  theme,
 }: LoginFormProps) {
   const t = useTranslations('login');
   const boundAction = handleLoginSubmit.bind(null, loginChallenge);
@@ -147,18 +150,22 @@ export function LoginForm({
   };
 
   return (
-    <CardWrapper mascotIdle={!passwordFocused}>
+    <CardWrapper mascotIdle={!passwordFocused} theme={theme}>
       <div className="mb-8 text-center">
-        <h1 className="mb-2 text-2xl font-bold text-gray-900">{t('signIn')}</h1>
-        <p className="text-sm text-gray-500">
-          {t.rich('toContinueTo', {
-            name: clientName,
-            b: (chunks) => <span className="font-semibold text-gray-700">{chunks}</span>,
-          })}
+        <h1 className="auth-title mb-2 text-2xl">{theme.loginTitle ?? t('signIn')}</h1>
+        <p className="auth-body text-sm">
+          {theme.loginSubtitle ? (
+            theme.loginSubtitle
+          ) : (
+            t.rich('toContinueTo', {
+              name: clientName,
+              b: (chunks) => <span className="auth-emphasis font-semibold">{chunks}</span>,
+            })
+          )}
         </p>
         {tenantName !== 'Shyntr' && (
-          <div className="mt-3 inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600">
-            {t('at')} <span className="ml-1 font-semibold text-gray-800">{tenantName}</span>
+          <div className="auth-badge mt-3 inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium">
+            {t('at')} <span className="auth-emphasis ml-1 font-semibold">{tenantName}</span>
           </div>
         )}
       </div>
@@ -188,7 +195,7 @@ export function LoginForm({
 
             {credentialMethods.length > 1 && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-gray-700">{t('signIn')}</Label>
+                <Label className="auth-label text-sm font-medium">{t('signIn')}</Label>
                 <div className="grid gap-2">
                   {credentialMethods.map((method) => {
                     const isSelected = selectedCredentialMethod?.id === method.id;
@@ -198,10 +205,8 @@ export function LoginForm({
                         key={method.id}
                         type="button"
                         variant="outline"
-                        className={`justify-start rounded-xl border text-sm font-medium transition-all ${
-                          isSelected
-                            ? 'border-blue-600 bg-blue-50 text-blue-700'
-                            : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                        className={`auth-selection-button justify-start border text-sm font-medium transition-all ${
+                          isSelected ? 'auth-selection-button-selected' : ''
                         }`}
                         onClick={() => setSelectedCredentialMethodId(method.id)}
                         disabled={isPending}
@@ -218,7 +223,7 @@ export function LoginForm({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="username" className="text-sm font-medium text-gray-700">
+              <Label htmlFor="username" className="auth-label text-sm font-medium">
                 {t('username')}
               </Label>
               <Input
@@ -229,12 +234,12 @@ export function LoginForm({
                 required
                 disabled={isPending}
                 onFocus={() => setPasswordFocused(false)}
-                className="h-12 rounded-xl border-gray-300 text-base focus:border-blue-500 focus:ring-blue-500"
+                className="auth-input h-12 text-base"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium text-gray-700">
+              <Label htmlFor="password" className="auth-label text-sm font-medium">
                 {t('password')}
               </Label>
               <Input
@@ -245,7 +250,7 @@ export function LoginForm({
                 required
                 disabled={isPending}
                 onFocus={() => setPasswordFocused(true)}
-                className="h-12 rounded-xl border-gray-300 text-base focus:border-blue-500 focus:ring-blue-500"
+                className="auth-input h-12 text-base"
               />
             </div>
 
@@ -256,9 +261,9 @@ export function LoginForm({
                   name="remember"
                   type="checkbox"
                   disabled={isPending}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="auth-native-checkbox h-4 w-4 rounded"
                 />
-                <Label htmlFor="remember" className="cursor-pointer text-sm font-normal text-gray-600">
+                <Label htmlFor="remember" className="auth-muted cursor-pointer text-sm font-normal">
                   {t('rememberMe')}
                 </Label>
               </div>
@@ -267,7 +272,7 @@ export function LoginForm({
             <div className="flex items-center justify-between pt-4">
               <Button
                 type="submit"
-                className="h-11 w-full rounded-xl bg-blue-600 px-8 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 hover:shadow-md"
+                className="auth-primary-button h-11 w-full px-8 text-sm font-semibold transition-all"
                 disabled={isPending}
               >
                 {isPending ? (
@@ -286,10 +291,10 @@ export function LoginForm({
         {credentialMethods.length > 0 && ssoMethods.length > 0 && (
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
+              <div className="auth-divider-line w-full border-t" />
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="bg-white px-2 text-gray-500">{t('or')}</span>
+              <span className="auth-divider-label px-2">{t('or')}</span>
             </div>
           </div>
         )}
@@ -301,7 +306,7 @@ export function LoginForm({
                 key={provider.id}
                 variant="outline"
                 type="button"
-                className="relative flex h-12 w-full items-center justify-center rounded-xl border-gray-300 text-sm font-medium text-gray-700 transition-all hover:border-gray-400 hover:bg-gray-50"
+                className="auth-secondary-button relative flex h-12 w-full items-center justify-center text-sm font-medium transition-all"
                 onClick={() => handleSSORedirect(provider.login_url)}
                 disabled={isPending}
               >
@@ -317,7 +322,7 @@ export function LoginForm({
                 <Button
                   type="button"
                   variant="ghost"
-                  className="px-4 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  className="auth-ghost-button px-4 text-sm"
                   onClick={handleCancel}
                   disabled={isPending}
                 >

@@ -1,4 +1,4 @@
-import { getConsentSession } from '@/lib/shyntr-api';
+import { getConsentSession, getTenantPortalTheme } from '@/lib/shyntr-api';
 import { ConsentForm } from '@/components/ConsentForm';
 import { SessionExpired } from '@/components/SessionExpired';
 
@@ -20,11 +20,13 @@ export default async function ConsentPage({ searchParams }: ConsentPageProps) {
     return <SessionExpired />;
   }
 
-  const tenantName = data.tenant || data.client?.tenant_id || 'Shyntr';
+  const brandingTenantId = data.tenant || data.client?.tenant_id || '';
+  const tenantName = brandingTenantId || 'Shyntr';
   const clientName = data.client?.name || data.client_id || 'Application';
   const requestedScopes = data.requested_scope || ['openid', 'profile'];
   const requestedAudience = data.requested_audience || [];
   const userSubject = data.subject;
+  const theme = await getTenantPortalTheme(brandingTenantId);
 
   return (
     <ConsentForm
@@ -34,6 +36,7 @@ export default async function ConsentPage({ searchParams }: ConsentPageProps) {
       requestedScopes={requestedScopes}
       requestedAudience={requestedAudience}
       userSubject={userSubject}
+      theme={theme}
     />
   );
 }
