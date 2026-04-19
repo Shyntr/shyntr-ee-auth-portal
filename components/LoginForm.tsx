@@ -2,8 +2,8 @@
 
 import { useFormState } from 'react-dom';
 import { useTranslations } from 'next-intl';
-import { useState, useTransition } from 'react';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { useState, useTransition, useEffect } from 'react';
+import { AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { handleLoginCancel, handleLoginSubmit } from '@/actions/auth';
 import type { AuthMethod } from '@/lib/shyntr-api';
 import type { PortalTheme } from '@/lib/portal-theme';
@@ -32,24 +32,34 @@ export function LoginForm({
   const boundAction = handleLoginSubmit.bind(null, loginChallenge);
   const [state, formAction] = useFormState(boundAction, {});
   const [isPending, startTransition] = useTransition();
+  const [isSubmitPending, setIsSubmitPending] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+
+  // Reset loading state when server response (state) is updated
+  useEffect(() => {
+    setIsSubmitPending(false);
+  }, [state]);
 
   const passwordMethod = methods.find((method) => method.type === 'password');
   const ldapMethods = methods.filter((method) => method.type === 'ldap');
   const ssoMethods = methods.filter(
     (method) => method.type === 'saml' || method.type === 'oidc'
   );
-  const credentialMethods = [...(passwordMethod ? [passwordMethod] : []), ...ldapMethods];
-  const initialCredentialMethod = credentialMethods[0];
-  const [selectedCredentialMethodId, setSelectedCredentialMethodId] = useState(
-    initialCredentialMethod?.id || ''
+
+  // LDAP methods are now treated as providers, not primary credential selectors
+  const credentialMethods = passwordMethod ? [passwordMethod] : [];
+  const providerMethods = [...ssoMethods, ...ldapMethods];
+
+  const initialMethod = passwordMethod || ldapMethods[0];
+  const [selectedMethodId, setSelectedMethodId] = useState(
+    initialMethod?.id || ''
   );
 
-  const selectedCredentialMethod =
-    credentialMethods.find((method) => method.id === selectedCredentialMethodId) ||
-    initialCredentialMethod;
+  const selectedMethod =
+    methods.find((method) => method.id === selectedMethodId) || initialMethod;
 
   const handleSubmit = (payload: FormData) => {
+    setIsSubmitPending(true);
     startTransition(() => {
       formAction(payload);
     });
@@ -59,17 +69,26 @@ export function LoginForm({
     await handleLoginCancel(loginChallenge);
   };
 
-  const handleSSORedirect = (loginUrl?: string) => {
-    if (!loginUrl) {
+  const handleProviderClick = (provider: AuthMethod) => {
+    if (provider.type === 'ldap') {
+      setSelectedMethodId(provider.id);
       return;
     }
 
-    window.location.href = loginUrl;
+    if (provider.login_url) {
+      window.location.href = provider.login_url;
+    }
+  };
+
+  const handleBackToDefault = () => {
+    if (passwordMethod) {
+      setSelectedMethodId(passwordMethod.id);
+    }
   };
 
   const credentialSubmitLabel =
-    selectedCredentialMethod?.type === 'ldap'
-      ? t('signInWith', { name: selectedCredentialMethod.name })
+    selectedMethod?.type === 'ldap'
+      ? t('signInWith', { name: selectedMethod.name })
       : t('login');
 
   const getProviderIcon = (provider: AuthMethod) => {
@@ -137,7 +156,7 @@ export function LoginForm({
       return <img src="/assets/ory.png" alt="Ory" className="h-6 w-6 object-contain" />;
     }
     if (name.includes('ldap') || name.includes('active directory')) {
-      return <img src="/assets/openid.png" alt="LDAP" className="h-6 w-6 object-contain" />;
+      return <img src="/assets/microsoft.png" alt="LDAP" className="h-6 w-6 object-contain" />;
     }
     if (name.includes('saml')) {
       return <img src="/assets/saml.png" alt="SAML" className="h-6 w-6 object-contain" />;
@@ -148,6 +167,9 @@ export function LoginForm({
 
     return null;
   };
+
+  const isLDAPActive = selectedMethod?.type === 'ldap';
+  const isLoading = isPending || isSubmitPending;
 
   return (
     <CardWrapper mascotIdle={!passwordFocused} theme={theme}>
@@ -180,25 +202,56 @@ export function LoginForm({
           </Alert>
         )}
 
-        {credentialMethods.length > 0 && (
+        {(selectedMethod?.type === 'password' || selectedMethod?.type === 'ldap') && (
           <form action={handleSubmit} className="space-y-4">
             <input
               type="hidden"
               name="auth_method_type"
-              value={selectedCredentialMethod?.type || 'password'}
+              value={selectedMethod?.type || 'password'}
             />
             <input
               type="hidden"
               name="auth_method_login_url"
-              value={selectedCredentialMethod?.login_url || ''}
+              value={selectedMethod?.login_url || ''}
             />
+
+            {isLDAPActive && (
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50/50 p-3 transition-all">
+                <div className="flex items-center">
+                  <div className="mr-3 flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm">
+                    {getProviderIcon(selectedMethod)}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
+                      LDAP Login
+                    </span>
+                    <span className="text-sm font-semibold text-blue-900">
+                      {selectedMethod.name}
+                    </span>
+                  </div>
+                </div>
+                {passwordMethod && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-blue-600 hover:bg-blue-100 hover:text-blue-700"
+                    onClick={handleBackToDefault}
+                    disabled={isLoading}
+                  >
+                    <ArrowLeft className="mr-1 h-3 w-3" />
+                    <span className="text-xs font-medium">Back</span>
+                  </Button>
+                )}
+              </div>
+            )}
 
             {credentialMethods.length > 1 && (
               <div className="space-y-2">
                 <Label className="auth-label text-sm font-medium">{t('signIn')}</Label>
                 <div className="grid gap-2">
                   {credentialMethods.map((method) => {
-                    const isSelected = selectedCredentialMethod?.id === method.id;
+                    const isSelected = selectedMethod?.id === method.id;
 
                     return (
                       <Button
@@ -208,8 +261,8 @@ export function LoginForm({
                         className={`auth-selection-button justify-start border text-sm font-medium transition-all ${
                           isSelected ? 'auth-selection-button-selected' : ''
                         }`}
-                        onClick={() => setSelectedCredentialMethodId(method.id)}
-                        disabled={isPending}
+                        onClick={() => setSelectedMethodId(method.id)}
+                        disabled={isLoading}
                       >
                         <span className="mr-3 flex h-6 w-6 items-center justify-center">
                           {getProviderIcon(method)}
@@ -232,7 +285,7 @@ export function LoginForm({
                 type="text"
                 placeholder={t('enterUsername')}
                 required
-                disabled={isPending}
+                disabled={isLoading}
                 onFocus={() => setPasswordFocused(false)}
                 className="auth-input h-12 text-base"
               />
@@ -248,19 +301,19 @@ export function LoginForm({
                 type="password"
                 placeholder={t('enterPassword')}
                 required
-                disabled={isPending}
+                disabled={isLoading}
                 onFocus={() => setPasswordFocused(true)}
                 className="auth-input h-12 text-base"
               />
             </div>
 
-            {selectedCredentialMethod?.type === 'password' && (
+            {selectedMethod?.type === 'password' && (
               <div className="flex items-center space-x-3 py-1">
                 <input
                   id="remember"
                   name="remember"
                   type="checkbox"
-                  disabled={isPending}
+                  disabled={isLoading}
                   className="auth-native-checkbox h-4 w-4 rounded"
                 />
                 <Label htmlFor="remember" className="auth-muted cursor-pointer text-sm font-normal">
@@ -273,9 +326,9 @@ export function LoginForm({
               <Button
                 type="submit"
                 className="auth-primary-button h-11 w-full px-8 text-sm font-semibold transition-all"
-                disabled={isPending}
+                disabled={isLoading}
               >
-                {isPending ? (
+                {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {t('signingIn')}
@@ -288,7 +341,7 @@ export function LoginForm({
           </form>
         )}
 
-        {credentialMethods.length > 0 && ssoMethods.length > 0 && (
+        {providerMethods.length > 0 && (
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
               <div className="auth-divider-line w-full border-t" />
@@ -299,16 +352,18 @@ export function LoginForm({
           </div>
         )}
 
-        {ssoMethods.length > 0 && (
+        {providerMethods.length > 0 && (
           <div className="space-y-3">
-            {ssoMethods.map((provider) => (
+            {providerMethods.map((provider) => (
               <Button
                 key={provider.id}
                 variant="outline"
                 type="button"
-                className="auth-secondary-button relative flex h-12 w-full items-center justify-center text-sm font-medium transition-all"
-                onClick={() => handleSSORedirect(provider.login_url)}
-                disabled={isPending}
+                className={`auth-secondary-button relative flex h-12 w-full items-center justify-center text-sm font-medium transition-all ${
+                  selectedMethodId === provider.id ? 'ring-2 ring-primary ring-offset-2' : ''
+                }`}
+                onClick={() => handleProviderClick(provider)}
+                disabled={isLoading}
               >
                 <div className="absolute left-4 flex items-center justify-center">
                   {getProviderIcon(provider)}
@@ -317,14 +372,14 @@ export function LoginForm({
               </Button>
             ))}
 
-            {credentialMethods.length === 0 && (
+            {(credentialMethods.length === 0 && !isLDAPActive) && (
               <div className="flex items-center justify-center pt-4">
                 <Button
                   type="button"
                   variant="ghost"
                   className="auth-ghost-button px-4 text-sm"
                   onClick={handleCancel}
-                  disabled={isPending}
+                  disabled={isLoading}
                 >
                   {t('cancel')}
                 </Button>
