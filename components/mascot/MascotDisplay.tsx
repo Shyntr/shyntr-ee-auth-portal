@@ -9,7 +9,7 @@ export default function MascotDisplay({ password = false } : {password: boolean}
             <AnimatePresence mode="wait">
                 <motion.img
                     key={password ? 'password' : 'idle'}
-                    src={password ? '/mascot_eyes_closed.png' : '/mascot.png'}
+                    src={password ? '/mascot_closed.png' : '/mascot.png'}
                     alt="Mascot"
                     className="w-full h-full object-contain drop-shadow-lg"
                     initial={{ scale: 1, opacity: 0.9 }}
