@@ -52,6 +52,7 @@
     "allow": "Allow",
     "cancel": "Cancel",
     "deny": "Deny",
+    "requestedAudiences": "Requested audiences",
     "rememberDecision": "Remember this decision",
     "processing": "Processing...",
     "scopes": {

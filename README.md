@@ -1,96 +1,105 @@
-<p align="center">
-  <img src="public/mascot.png" alt="Project Logo" width="175">
-  <br>
-  <i>Shyntr - Auth Portal</i>
-</p>
+# Shyntr EE Auth Portal
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)
-![Yarn](https://img.shields.io/badge/yarn-1.22.x-orange.svg)
-![Next.js](https://img.shields.io/badge/Next.js-14-black.svg?logo=next.js)
+`shyntr-ee-auth-portal` is the enterprise auth portal runtime for Shyntr.
 
-The **Shyntr Auth Portal** is the highly scalable, user-facing authentication interface for the Shyntr ecosystem. It handles the core identity flows including Login, User Consent, and Logout routing for the Zero Trust Identity Broker.
+This repository is responsible for rendering the user-facing authentication experience, including login, consent, and logout pages. It is intended to host enterprise-specific runtime presentation concerns such as branded auth rendering, runtime theme application, and tenant-scoped published branding consumption.
 
-## ✨ Features
-* **Custom Authentication UI:** A frictionless and secure login experience.
-* **Consent Management:** Granular OAuth2/OIDC scope approval screens.
-* **Protocol Agnostic:** Works seamlessly with the Shyntr Go Backend for cross-protocol (SAML/OIDC) identity flows.
-* **High Performance:** Server-Side Rendered (SSR) using Next.js App Router for optimal load times and LCP.
+## Scope
 
-## 🚀 Tech Stack
-* **Framework:** Next.js (App Router)
-* **Styling:** Tailwind CSS, Shadcn UI components
-* **Package Manager:** Yarn (v1.22.x)
-* **Deployment:** Docker (Next.js Standalone Mode)
+This repository owns:
 
-## 🛠️ Getting Started (Local Development)
+- Branded login, consent, and logout rendering
+- Runtime theme application
+- Tenant-scoped published branding consumption
+- Auth UI presentation
+
+This repository does not own:
+
+- Branding persistence
+- Branding editor UX
+- Backend management API ownership
+- Backend auth domain truth
+
+## Backend dependency
+
+This runtime depends on the Shyntr backend for auth transaction state and continuation. The backend remains the source of truth for:
+
+- Login and consent challenge state
+- Tenant context derived from auth/backend state
+- Auth continuation and redirect behavior
+- Available login methods and protocol-specific handling
+
+The portal should treat backend-provided published branding as runtime input. It should not introduce local ownership of branding data or modify auth protocol semantics.
+
+## Runtime architecture
+
+- Framework: Next.js App Router
+- Styling: Tailwind CSS with shared CSS variables
+- Package manager: Yarn 1.22.x
+- Container runtime: Docker using Next.js standalone output
+
+## Local development
 
 ### Prerequisites
-* Node.js v22.x
-* Yarn v1.22.x
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/shyntr/shyntr-auth-portal.git](https://github.com/shyntr/shyntr-auth-portal.git)
-   cd shyntr-auth-portal
-   ```
-2. Install dependencies:
+- Node.js 22.x
+- Yarn 1.22.x
 
-    ```bash
-    yarn install --frozen-lockfile
-    ```
-3. Start the development server:
+### Environment
 
-    ```bash
-    yarn dev
-    ```
+The runtime expects backend origins to be configured through environment variables:
 
-4. Open http://localhost:3000 in your browser.
+- `SHYNTR_INTERNAL_API_URL`
+- `SHYNTR_PUBLIC_API_URL`
 
-## 🐳 Docker Production Build
-The application uses the Next.js standalone output mode to drastically reduce the container image size and improve security (running as a non-root user).
+Example local values:
 
 ```bash
-# Build the image
-docker build -t shyntr/shyntr-auth-portal:latest .
-
-# Run the container
-docker run -d -p 3000:3000 --name shyntr/shyntr-auth-portal shyntr/shyntr-auth-portal:latest
+SHYNTR_INTERNAL_API_URL=http://localhost:7497
+SHYNTR_PUBLIC_API_URL=http://localhost:7496
 ```
 
-## 🔄 CI/CD Pipeline
-Automated deployments are configured via GitHub Actions. Tagging a commit (e.g., git tag v1.0.0) triggers the pipeline to:
+### Install and run
 
-* Validate dependencies and build logic.
-* Generate multi-arch Docker images (AMD64/ARM64).
-* Push images to Docker Hub with intelligent SemVer tagging.
-* Auto-sync this README to the Docker Hub repository page.
+```bash
+yarn install --frozen-lockfile
+yarn dev
+```
 
----
+The development server listens on `http://localhost:3000`.
 
-## 🤝 Contributing
+## Production build
 
-We love community! 💖
+Build the application:
 
-Found a bug? Have a great idea? Feel free to jump in! We appreciate every piece of feedback and contribution.
-Let's build the ultimate Identity Broker together! 🚀
+```bash
+yarn build
+```
 
-## 📄 License
+Start the production server:
 
-Free as in freedom! 🦅
+```bash
+yarn start
+```
 
-Shyntr is proudly open-source and licensed under the **Apache-2.0** license.
-Check the [LICENSE](https://github.com/Shyntr/shyntr/blob/main/LICENSE) file for the boring legal details.
+Build the Docker image:
 
----
+```bash
+docker build -t shyntr/shyntr-ee-auth-portal:latest .
+```
 
-<div>
-  <a href="https://buymeacoffee.com/nevzatcirak17" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40" align="left">
-  </a>
-  <a href="https://nevzatcirak.com" target="_blank">
-    <img src="public/nev.svg" alt="NEV Logo" height="40" align="right">
-  </a>
-</div>
-<br clear="all">
+Run the Docker image:
+
+```bash
+docker run -d -p 3000:3000 --name shyntr-ee-auth-portal shyntr/shyntr-ee-auth-portal:latest
+```
+
+## CI and release artifacts
+
+GitHub Actions builds and publishes the runtime container image for this repository. The current Docker artifact target is:
+
+- `shyntr/shyntr-ee-auth-portal`
+
+## License
+
+See the existing repository license materials for current licensing terms.

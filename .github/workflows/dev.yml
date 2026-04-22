@@ -1,4 +1,4 @@
-name: "Auth Portal Release"
+name: "EE Auth Portal Develop Release"
 
 on:
   push:
@@ -50,7 +50,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: shyntr/shyntr-auth-portal
+          images: shyntr/shyntr-ee-auth-portal
           tags: |
             type=raw,value=dev
 
@@ -84,6 +84,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          repository: shyntr/shyntr-auth-portal
-          short-description: "Shyntr - Identity Management Auth Portal"
+          repository: shyntr/shyntr-ee-auth-portal
+          short-description: "Shyntr enterprise auth portal runtime"
           readme-filepath: ./README.md

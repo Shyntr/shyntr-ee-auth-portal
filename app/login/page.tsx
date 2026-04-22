@@ -1,4 +1,4 @@
-import { getLoginSession, getLoginMethods } from '@/lib/shyntr-api';
+import { getLoginSession, getLoginMethods, getTenantPortalTheme } from '@/lib/shyntr-api';
 import { LoginForm } from '@/components/LoginForm';
 import { SessionExpired } from '@/components/SessionExpired';
 
@@ -16,17 +16,18 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const [sessionRes, methodsRes] = await Promise.all([
     getLoginSession(loginChallenge),
-    getLoginMethods(loginChallenge)
+    getLoginMethods(loginChallenge),
   ]);
 
   if (sessionRes.error || !sessionRes.data || methodsRes.error) {
-    console.error('Login session or methods fetch failed:', sessionRes.error || methodsRes.error);
     return <SessionExpired />;
   }
 
-  const tenantName = sessionRes.data.tenant?.display_name || 'Shyntr';
-  const clientName = sessionRes.data.client?.client_name || 'Application';
+  const brandingTenantId = sessionRes.data.TenantID || methodsRes.data?.tenant_id || '';
+  const tenantName = brandingTenantId || 'Shyntr';
+  const clientName = sessionRes.data.ClientID || 'Application';
   const methods = methodsRes.data?.methods || [];
+  const theme = await getTenantPortalTheme(brandingTenantId);
 
   return (
     <LoginForm
@@ -34,6 +35,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       tenantName={tenantName}
       clientName={clientName}
       methods={methods}
+      theme={theme}
     />
   );
 }

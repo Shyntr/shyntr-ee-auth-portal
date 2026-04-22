@@ -1,45 +1,50 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useTransition } from 'react';
 import { useFormState } from 'react-dom';
 import { useTranslations } from 'next-intl';
-import { handleConsentAccept, handleConsentDeny, ConsentFormState } from '@/actions/auth';
+import { AlertCircle, Loader2, Mail, MapPin, Phone, RefreshCw, Shield, User } from 'lucide-react';
+import { handleConsentAccept, handleConsentDeny } from '@/actions/auth';
+import type { PortalTheme } from '@/lib/portal-theme';
 import { CardWrapper } from './CardWrapper';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, User, Shield, Mail, RefreshCw, MapPin, Phone } from 'lucide-react';
 
 interface ConsentFormProps {
   consentChallenge: string;
   tenantName: string;
   clientName: string;
   requestedScopes: string[];
+  requestedAudience: string[];
   userSubject?: string;
+  theme: PortalTheme;
 }
 
-const SCOPE_ICONS: Record<string, React.ReactNode> = {
-  openid: <Shield className="w-5 h-5 text-blue-600" />,
-  profile: <User className="w-5 h-5 text-purple-600" />,
-  email: <Mail className="w-5 h-5 text-green-600" />,
-  offline_access: <RefreshCw className="w-5 h-5 text-orange-600" />,
-  address: <MapPin className="w-5 h-5 text-red-600" />,
-  phone: <Phone className="w-5 h-5 text-teal-600" />,
-  test: <User className="w-5 h-5 text-purple-600" />,
-  custom: <Shield className="w-5 h-5 text-teal-600" />,
+const SCOPE_ICONS: Record<string, ReactNode> = {
+  openid: <Shield className="auth-icon h-5 w-5" />,
+  profile: <User className="auth-icon h-5 w-5" />,
+  email: <Mail className="auth-icon h-5 w-5" />,
+  offline_access: <RefreshCw className="auth-icon h-5 w-5" />,
+  address: <MapPin className="auth-icon h-5 w-5" />,
+  phone: <Phone className="auth-icon h-5 w-5" />,
+  test: <User className="auth-icon h-5 w-5" />,
+  custom: <Shield className="auth-icon h-5 w-5" />,
 };
 
-export function ConsentForm({ 
-  consentChallenge, 
-  tenantName, 
-  clientName, 
+export function ConsentForm({
+  consentChallenge,
+  tenantName,
+  clientName,
   requestedScopes,
-  userSubject 
+  requestedAudience,
+  userSubject,
+  theme,
 }: ConsentFormProps) {
   const t = useTranslations('consent');
   const scopeT = useTranslations('consent.scopes');
-
   const boundAction = handleConsentAccept.bind(null, consentChallenge);
   const [state, formAction] = useFormState(boundAction, {});
   const [isPending, startTransition] = useTransition();
@@ -60,76 +65,103 @@ export function ConsentForm({
   const isProcessing = isPending || isDenying;
 
   return (
-    <CardWrapper>
-      <div className="text-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          {t('accessRequest')}
-        </h1>
-        <p className="text-sm text-gray-500">
-          <span className="font-semibold text-gray-700">{clientName}</span>{' '}
-          {t('wantsAccess')}
+    <CardWrapper theme={theme}>
+      <div className="mb-6 text-center">
+        <h1 className="auth-title mb-2 text-2xl">{t('accessRequest')}</h1>
+        <p className="auth-body text-sm">
+          <span className="auth-emphasis font-semibold">{clientName}</span> {t('wantsAccess')}
         </p>
+        {tenantName !== 'Shyntr' && (
+          <div className="auth-badge mt-3 inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium">
+            {tenantName}
+          </div>
+        )}
       </div>
 
-      {/* User Profile Chip */}
       {userSubject && (
-        <div className="flex items-center justify-center mb-6">
-          <div className="inline-flex items-center gap-3 px-4 py-2.5 bg-gray-50 rounded-xl border border-gray-200">
-            <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center">
-              <User className="w-5 h-5 text-blue-600" />
+        <div className="mb-6 flex items-center justify-center">
+          <div className="auth-user-chip inline-flex items-center gap-3 px-4 py-2.5">
+            <div className="auth-user-chip-icon flex h-9 w-9 items-center justify-center rounded-full">
+              <User className="auth-icon h-5 w-5" />
             </div>
-            <span className="text-sm text-gray-700 font-medium">{userSubject}</span>
+            <span className="auth-emphasis text-sm font-medium">{userSubject}</span>
           </div>
         </div>
       )}
 
       <form action={handleSubmit} className="space-y-6">
         {state.error && (
-          <Alert variant="destructive" className="bg-red-50 border-red-200 rounded-xl">
+          <Alert variant="destructive" className="rounded-xl border-red-200 bg-red-50">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="text-sm">{state.error}</AlertDescription>
           </Alert>
         )}
 
         <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-700 mb-3">
-            {t('selectPermissions')}
-          </p>
-          <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+          <p className="auth-label mb-3 text-sm font-medium">{t('selectPermissions')}</p>
+          <div className="auth-scope-panel divide-y border">
             {requestedScopes.map((scope) => (
-              <div
-                key={scope}
-                className="flex items-center gap-4 p-4 bg-white hover:bg-gray-50 transition-colors"
-              >
+              <div key={scope} className="auth-scope-row flex items-center gap-4 p-4 transition-colors">
                 <Checkbox
                   id={`scope_${scope}`}
                   name={`scope_${scope}`}
                   defaultChecked
                   disabled={isProcessing}
-                  className="h-5 w-5 border-gray-300 rounded data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                  className="auth-checkbox h-5 w-5 rounded"
                 />
                 <Label
                   htmlFor={`scope_${scope}`}
-                  className="flex items-center gap-3 text-sm text-gray-700 cursor-pointer flex-1"
+                  className="auth-scope-label flex flex-1 cursor-pointer items-center gap-3 text-sm"
                 >
-                  <div className="flex-shrink-0 w-9 h-9 bg-gray-100 rounded-lg flex items-center justify-center">
-                    {SCOPE_ICONS[scope] || <Shield className="w-5 h-5 text-gray-500" />}
+                  <div className="auth-icon-surface flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg">
+                    {SCOPE_ICONS[scope] || <Shield className="auth-icon h-5 w-5" />}
                   </div>
-                  <span className="font-medium">{scopeT(scope as keyof typeof scopeT) || scope}</span>
+                  <span className="font-medium">{scopeT(scope as any) || scope}</span>
                 </Label>
               </div>
             ))}
           </div>
         </div>
 
+        {requestedAudience.length > 0 && (
+          <div className="space-y-2">
+            <p className="auth-label mb-3 text-sm font-medium">{t('requestedAudiences')}</p>
+            <div className="auth-scope-panel divide-y border">
+              {requestedAudience.map((audience) => (
+                <div
+                  key={audience}
+                  className="auth-scope-row flex items-center gap-4 p-4 transition-colors"
+                >
+                  <Checkbox
+                    id={`audience_${audience}`}
+                    name={`audience_${audience}`}
+                    defaultChecked
+                    disabled={isProcessing}
+                    className="auth-checkbox h-5 w-5 rounded"
+                  />
+                  <Label
+                    htmlFor={`audience_${audience}`}
+                    className="auth-scope-label flex flex-1 cursor-pointer items-center gap-3 text-sm"
+                  >
+                    <div className="auth-icon-surface flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg">
+                      <Shield className="auth-icon h-5 w-5" />
+                    </div>
+                    <span className="font-medium">{audience}</span>
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center space-x-3 py-2">
           <Checkbox
             id="remember"
             name="remember"
             disabled={isProcessing}
-            className="h-5 w-5 border-gray-300 rounded"
+            className="auth-checkbox h-5 w-5 rounded"
           />
-          <Label htmlFor="remember" className="text-sm text-gray-600 cursor-pointer font-normal">
+          <Label htmlFor="remember" className="auth-muted cursor-pointer text-sm font-normal">
             {t('rememberDecision')}
           </Label>
         </div>
@@ -138,7 +170,7 @@ export function ConsentForm({
           <Button
             type="button"
             variant="outline"
-            className="h-11 px-6 text-sm font-semibold border-gray-300 text-gray-700 hover:bg-gray-100 hover:border-gray-400 rounded-xl transition-all"
+            className="auth-secondary-button h-11 px-6 text-sm font-semibold transition-all"
             onClick={handleDeny}
             disabled={isProcessing}
           >
@@ -153,7 +185,7 @@ export function ConsentForm({
           </Button>
           <Button
             type="submit"
-            className="h-11 px-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow-md transition-all"
+            className="auth-primary-button h-11 px-6 text-sm font-semibold transition-all"
             disabled={isProcessing}
           >
             {isPending ? (
