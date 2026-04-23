@@ -1,4 +1,7 @@
-import { verifyPasswordCredentials } from '@/lib/shyntr-api';
+import {
+  normalizePasswordVerifierIdentityResult,
+  verifyPasswordCredentials,
+} from '@/lib/shyntr-api';
 
 const VALID_URL = 'http://localhost:7497/auth/password/verify';
 
@@ -7,6 +10,25 @@ const TEST_PAYLOAD = {
   login_challenge: 'test_challenge_abc123',
   username: 'testuser',
   password: 'S3cr3tP@ssw0rd!',
+};
+const VALID_IDENTITY_RESULT = {
+  subject: 'ext:testuser',
+  context: {
+    identity: {
+      attributes: {
+        preferred_username: 'testuser',
+        email: 'testuser@example.com',
+        email_verified: true,
+      },
+      groups: ['engineering'],
+      roles: ['admin'],
+    },
+    authentication: {
+      amr: ['pwd'],
+      acr: 'urn:shyntr:password',
+      authenticated_at: '2026-04-23T18:30:00Z',
+    },
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -51,35 +73,29 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('verifyPasswordCredentials — success', () => {
-  it('returns redirect_to on 200 with valid absolute http redirect_to', async () => {
-    mockFetchResponse(200, { redirect_to: 'https://backend.shyntr.example/oauth/continue' });
+  it('returns normalized identity data on 200 with a valid verifier response', async () => {
+    mockFetchResponse(200, VALID_IDENTITY_RESULT);
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
-    expect(result.data?.redirect_to).toBe('https://backend.shyntr.example/oauth/continue');
+    expect(result.data).toEqual(VALID_IDENTITY_RESULT);
     expect(result.error).toBeUndefined();
   });
 
-  it('follows a 302 with a valid Location header', async () => {
-    mockFetchResponse(302, undefined, {
-      location: 'https://backend.shyntr.example/oauth/continue',
-    });
+  it('sends only the expected credential verifier request body', async () => {
+    mockFetchResponse(200, VALID_IDENTITY_RESULT);
 
-    const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
+    await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
-    expect(result.data?.redirect_to).toBe('https://backend.shyntr.example/oauth/continue');
-    expect(result.error).toBeUndefined();
-  });
-
-  it('follows a 301 with a valid Location header', async () => {
-    mockFetchResponse(301, undefined, {
-      location: 'https://backend.shyntr.example/oauth/continue',
-    });
-
-    const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
-
-    expect(result.data?.redirect_to).toBe('https://backend.shyntr.example/oauth/continue');
-    expect(result.error).toBeUndefined();
+    expect(global.fetch).toHaveBeenCalledWith(
+      VALID_URL,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(TEST_PAYLOAD),
+        redirect: 'manual',
+        cache: 'no-store',
+      })
+    );
   });
 });
 
@@ -155,7 +171,7 @@ describe('verifyPasswordCredentials — login failed', () => {
     expect(result.error?.error).toBe('timeout');
   });
 
-  it('classifies 200 with no redirect_to as login_failed', async () => {
+  it('classifies 200 with no subject as login_failed', async () => {
     mockFetchResponse(200, { some_other_field: 'value' });
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
@@ -163,15 +179,15 @@ describe('verifyPasswordCredentials — login failed', () => {
     expect(result.error?.error).toBe('login_failed');
   });
 
-  it('classifies 200 with empty redirect_to as login_failed', async () => {
-    mockFetchResponse(200, { redirect_to: '' });
+  it('classifies 200 with empty subject as login_failed', async () => {
+    mockFetchResponse(200, { subject: '', context: VALID_IDENTITY_RESULT.context });
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
     expect(result.error?.error).toBe('login_failed');
   });
 
-  it('classifies 302 without a Location header as login_failed', async () => {
+  it('classifies 302 as login_failed', async () => {
     mockFetchResponse(302, undefined, {});
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
@@ -187,24 +203,31 @@ describe('verifyPasswordCredentials — login failed', () => {
     expect(result.error?.error).toBe('login_failed');
   });
 
-  it('rejects a javascript: redirect_to (200 body) as login_failed', async () => {
-    mockFetchResponse(200, { redirect_to: 'javascript:alert(1)' });
+  it('rejects an invalid normalized identity context as login_failed', async () => {
+    mockFetchResponse(200, {
+      subject: 'ext:testuser',
+      context: {
+        identity: {
+          groups: ['engineering', ''],
+        },
+      },
+    });
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
     expect(result.error?.error).toBe('login_failed');
   });
 
-  it('rejects a data: redirect_to (200 body) as login_failed', async () => {
-    mockFetchResponse(200, { redirect_to: 'data:text/html,<script>evil</script>' });
+  it('rejects a missing normalized identity context as login_failed', async () => {
+    mockFetchResponse(200, { subject: 'ext:testuser' });
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
     expect(result.error?.error).toBe('login_failed');
   });
 
-  it('rejects a javascript: Location header (302) as login_failed', async () => {
-    mockFetchResponse(302, undefined, { location: 'javascript:alert(1)' });
+  it('rejects a normalized identity context without identity or authentication', async () => {
+    mockFetchResponse(200, { subject: 'ext:testuser', context: {} });
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
@@ -252,10 +275,69 @@ describe('verifyPasswordCredentials — secret safety', () => {
   });
 
   it('does not include the password in success result objects', async () => {
-    mockFetchResponse(200, { redirect_to: 'https://backend.shyntr.example/oauth/continue' });
+    mockFetchResponse(200, VALID_IDENTITY_RESULT);
 
     const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
 
     expect(JSON.stringify(result)).not.toContain(TEST_PAYLOAD.password);
+  });
+
+  it('does not include raw invalid normalized identity data in returned errors', async () => {
+    mockFetchResponse(200, {
+      subject: 'ext:testuser',
+      context: {
+        identity: {
+          attributes: {
+            private_key: { raw: 'must-not-leak' },
+          },
+        },
+      },
+    });
+
+    const result = await verifyPasswordCredentials(VALID_URL, TEST_PAYLOAD);
+
+    expect(result.error?.error).toBe('login_failed');
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
+    expect(JSON.stringify(result)).not.toContain('private_key');
+  });
+});
+
+describe('normalizePasswordVerifierIdentityResult', () => {
+  it('copies only the normalized identity envelope that Shyntr accepts', () => {
+    const result = normalizePasswordVerifierIdentityResult({
+      ...VALID_IDENTITY_RESULT,
+      upstream_response: { token: 'must-not-forward' },
+      context: {
+        ...VALID_IDENTITY_RESULT.context,
+        raw: { token: 'must-not-forward' },
+      },
+    });
+
+    expect(result).toEqual(VALID_IDENTITY_RESULT);
+    expect(JSON.stringify(result)).not.toContain('must-not-forward');
+  });
+
+  it('rejects subjects with surrounding whitespace', () => {
+    expect(
+      normalizePasswordVerifierIdentityResult({
+        subject: ' ext:testuser ',
+        context: VALID_IDENTITY_RESULT.context,
+      })
+    ).toBeUndefined();
+  });
+
+  it('rejects unsupported attribute values', () => {
+    expect(
+      normalizePasswordVerifierIdentityResult({
+        subject: 'ext:testuser',
+        context: {
+          identity: {
+            attributes: {
+              profile: { nested: true },
+            },
+          },
+        },
+      })
+    ).toBeUndefined();
   });
 });

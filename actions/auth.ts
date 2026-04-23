@@ -3,12 +3,14 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import {
+  acceptLogin,
   acceptConsent,
   isAllowedAuthUrl,
   loginWithLDAP,
   rejectConsent,
   rejectLogin,
   verifyPasswordCredentials,
+  AcceptLoginPayload,
   AcceptConsentPayload,
 } from '@/lib/shyntr-api';
 
@@ -94,16 +96,29 @@ export async function handleLoginSubmit(
       return { error: 'login_failed' };
     }
 
-    if (result.data?.redirect_to) {
-      redirect(result.data.redirect_to);
+    if (!result.data) {
+      return { error: 'login_failed' };
+    }
+
+    const payload: AcceptLoginPayload = {
+      subject: result.data.subject,
+      remember,
+      remember_for: remember ? 3600 : 0,
+      context: result.data.context,
+    };
+
+    const acceptResult = await acceptLogin(loginChallenge, payload);
+
+    if (acceptResult.error) {
+      return { error: 'login_failed' };
+    }
+
+    if (acceptResult.data?.redirect_to) {
+      redirect(acceptResult.data.redirect_to);
     }
 
     return { error: 'login_failed' };
   }
-
-  // remember is used only in the local AcceptLoginPayload path which has been
-  // removed. Suppress the unused-variable warning by referencing it here.
-  void remember;
 
   return { error: 'login_failed' };
 }

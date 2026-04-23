@@ -1,5 +1,6 @@
 import { handleLoginSubmit } from '@/actions/auth';
 import {
+  acceptLogin,
   loginWithLDAP,
   verifyPasswordCredentials,
   isAllowedAuthUrl,
@@ -11,11 +12,12 @@ import { redirect } from 'next/navigation';
 // ---------------------------------------------------------------------------
 
 jest.mock('@/lib/shyntr-api', () => ({
+  acceptLogin: jest.fn(),
   loginWithLDAP: jest.fn(),
   verifyPasswordCredentials: jest.fn(),
   isAllowedAuthUrl: jest.fn(),
-  acceptConsent: jest.fn(),
   rejectLogin: jest.fn(),
+  acceptConsent: jest.fn(),
   rejectConsent: jest.fn(),
 }));
 
@@ -37,6 +39,7 @@ const mockLoginWithLDAP = loginWithLDAP as jest.MockedFunction<typeof loginWithL
 const mockVerifyPassword = verifyPasswordCredentials as jest.MockedFunction<
   typeof verifyPasswordCredentials
 >;
+const mockAcceptLogin = acceptLogin as jest.MockedFunction<typeof acceptLogin>;
 const mockIsAllowedAuthUrl = isAllowedAuthUrl as jest.MockedFunction<typeof isAllowedAuthUrl>;
 const mockRedirect = redirect as jest.MockedFunction<typeof redirect>;
 
@@ -49,6 +52,23 @@ const VALID_PASSWORD_URL = 'http://localhost:7497/auth/password/verify';
 const VALID_LDAP_URL = 'http://localhost:7497/auth/ldap/verify';
 const TEST_PASSWORD = 'SuperSecret123!';
 const REDIRECT_TARGET = 'https://app.shyntr.example/oauth/callback';
+const NORMALIZED_IDENTITY_RESULT = {
+  subject: 'ext:testuser',
+  context: {
+    identity: {
+      attributes: {
+        preferred_username: 'testuser',
+        email: 'testuser@example.com',
+      },
+      groups: ['engineering'],
+      roles: [],
+    },
+    authentication: {
+      amr: ['pwd'],
+      authenticated_at: '2026-04-23T18:30:00Z',
+    },
+  },
+};
 
 function makeFormData(fields: Record<string, string>): FormData {
   const fd = new FormData();
@@ -172,18 +192,26 @@ describe('handleLoginSubmit — password URL validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleLoginSubmit — password verifier responses', () => {
-  it('calls redirect on verifier success', async () => {
-    mockVerifyPassword.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
+  it('accepts login and redirects on verifier identity success', async () => {
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
 
     // In tests, redirect() is a jest.fn() that does NOT throw — execution
     // continues past it. We catch any unexpected throw just in case.
     await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm()).catch(() => {});
 
+    expect(mockAcceptLogin).toHaveBeenCalledWith(VALID_CHALLENGE, {
+      subject: 'ext:testuser',
+      remember: false,
+      remember_for: 0,
+      context: NORMALIZED_IDENTITY_RESULT.context,
+    });
     expect(mockRedirect).toHaveBeenCalledWith(REDIRECT_TARGET);
   });
 
   it('calls verifyPasswordCredentials with the correct payload', async () => {
-    mockVerifyPassword.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
 
     await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm()).catch(() => {});
 
@@ -194,6 +222,25 @@ describe('handleLoginSubmit — password verifier responses', () => {
     });
   });
 
+  it('passes remember preferences to Shyntr login accept', async () => {
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
+
+    await handleLoginSubmit(
+      VALID_CHALLENGE,
+      {},
+      passwordForm({ remember: 'on' })
+    ).catch(() => {});
+
+    expect(mockAcceptLogin).toHaveBeenCalledWith(
+      VALID_CHALLENGE,
+      expect.objectContaining({
+        remember: true,
+        remember_for: 3600,
+      })
+    );
+  });
+
   it('returns invalid_credentials when verifier returns invalid_credentials error', async () => {
     mockVerifyPassword.mockResolvedValue({
       error: { error: 'invalid_credentials', status_code: 401 },
@@ -202,6 +249,7 @@ describe('handleLoginSubmit — password verifier responses', () => {
     const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
 
     expect(result.error).toBe('invalid_credentials');
+    expect(mockAcceptLogin).not.toHaveBeenCalled();
   });
 
   it('returns login_failed when verifier returns timeout', async () => {
@@ -212,6 +260,7 @@ describe('handleLoginSubmit — password verifier responses', () => {
     const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
 
     expect(result.error).toBe('login_failed');
+    expect(mockAcceptLogin).not.toHaveBeenCalled();
   });
 
   it('returns login_failed when verifier returns a server error', async () => {
@@ -222,11 +271,24 @@ describe('handleLoginSubmit — password verifier responses', () => {
     const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
 
     expect(result.error).toBe('login_failed');
+    expect(mockAcceptLogin).not.toHaveBeenCalled();
   });
 
   it('returns login_failed when verifier returns a network error', async () => {
     mockVerifyPassword.mockResolvedValue({
       error: { error: 'network_error', status_code: 0 },
+    });
+
+    const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
+
+    expect(result.error).toBe('login_failed');
+    expect(mockAcceptLogin).not.toHaveBeenCalled();
+  });
+
+  it('returns login_failed when Shyntr login accept rejects verifier identity data', async () => {
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({
+      error: { error: 'validation_error', status_code: 400 },
     });
 
     const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
@@ -278,7 +340,8 @@ describe('handleLoginSubmit — static credential removal', () => {
 
 describe('handleLoginSubmit — payload security', () => {
   it('does not send tenant fields to the verifier', async () => {
-    mockVerifyPassword.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({ data: { redirect_to: REDIRECT_TARGET } });
 
     await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm()).catch(() => {});
 
@@ -307,6 +370,18 @@ describe('handleLoginSubmit — payload security', () => {
     const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
 
     expect(JSON.stringify(result)).not.toContain(TEST_PASSWORD);
+  });
+
+  it('does not include normalized identity data in the returned error state', async () => {
+    mockVerifyPassword.mockResolvedValue({ data: NORMALIZED_IDENTITY_RESULT });
+    mockAcceptLogin.mockResolvedValue({
+      error: { error: 'validation_error', error_description: 'Backend rejected context.' },
+    });
+
+    const result = await handleLoginSubmit(VALID_CHALLENGE, {}, passwordForm());
+
+    expect(JSON.stringify(result)).not.toContain('testuser@example.com');
+    expect(JSON.stringify(result)).not.toContain('engineering');
   });
 });
 

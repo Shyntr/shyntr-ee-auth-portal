@@ -78,6 +78,31 @@ export interface PasswordVerifyPayload {
   password: string;
 }
 
+type NormalizedIdentityAttributeValue = string | number | boolean | null;
+
+export interface NormalizedLoginIdentity {
+  attributes?: Record<string, NormalizedIdentityAttributeValue>;
+  groups?: string[];
+  roles?: string[];
+}
+
+export interface NormalizedLoginAuthentication {
+  amr?: string[];
+  acr?: string;
+  authenticated_at?: string;
+}
+
+export interface NormalizedLoginContext {
+  [key: string]: unknown;
+  identity?: NormalizedLoginIdentity;
+  authentication?: NormalizedLoginAuthentication;
+}
+
+export interface PasswordVerifierIdentityResult {
+  subject: string;
+  context: NormalizedLoginContext;
+}
+
 export interface AcceptConsentPayload {
   grant_scope: string[];
   grant_audience?: string[];
@@ -385,19 +410,6 @@ function normalizeLogoAlt(value: string | undefined, tenantId: string): string {
 function isValidHttpsUrl(value: string): boolean {
   try {
     return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-// Returns true for absolute http: or https: URLs.
-// Used to validate redirect_to values returned by external verifiers before
-// the portal follows them.
-function isAbsoluteHttpUrl(value: string): boolean {
-  if (!value || value.trim() === '') return false;
-  try {
-    const { protocol } = new URL(value);
-    return protocol === 'http:' || protocol === 'https:';
   } catch {
     return false;
   }
@@ -873,23 +885,198 @@ export async function loginWithLDAP(
 // apiClient timeout (10 s) so failures surface before an ambient deadline.
 const VERIFIER_TIMEOUT_MS = 8000;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function isCleanString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && value.trim() === value;
+}
+
+function sanitizeStringList(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const sanitized: string[] = [];
+  for (const item of value) {
+    if (!isCleanString(item)) {
+      return undefined;
+    }
+    sanitized.push(item);
+  }
+
+  return sanitized;
+}
+
+function sanitizeIdentityAttributes(
+  value: unknown
+): Record<string, NormalizedIdentityAttributeValue> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const attributes: Record<string, NormalizedIdentityAttributeValue> = {};
+
+  for (const [key, attributeValue] of Object.entries(value)) {
+    if (!isCleanString(key)) {
+      return undefined;
+    }
+
+    if (
+      attributeValue !== null &&
+      typeof attributeValue !== 'string' &&
+      typeof attributeValue !== 'number' &&
+      typeof attributeValue !== 'boolean'
+    ) {
+      return undefined;
+    }
+
+    attributes[key] = attributeValue;
+  }
+
+  return attributes;
+}
+
+function sanitizeNormalizedIdentity(value: unknown): NormalizedLoginIdentity | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const attributes = sanitizeIdentityAttributes(value.attributes);
+  const groups = sanitizeStringList(value.groups);
+  const roles = sanitizeStringList(value.roles);
+
+  if (
+    (value.attributes !== undefined && attributes === undefined) ||
+    (value.groups !== undefined && groups === undefined) ||
+    (value.roles !== undefined && roles === undefined)
+  ) {
+    return undefined;
+  }
+
+  const identity: NormalizedLoginIdentity = {};
+  if (attributes !== undefined) {
+    identity.attributes = attributes;
+  }
+  if (groups !== undefined) {
+    identity.groups = groups;
+  }
+  if (roles !== undefined) {
+    identity.roles = roles;
+  }
+
+  return identity;
+}
+
+function sanitizeNormalizedAuthentication(
+  value: unknown
+): NormalizedLoginAuthentication | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const amr = sanitizeStringList(value.amr);
+  if (value.amr !== undefined && amr === undefined) {
+    return undefined;
+  }
+
+  const authentication: NormalizedLoginAuthentication = {};
+
+  if (amr !== undefined) {
+    authentication.amr = amr;
+  }
+
+  if (value.acr !== undefined) {
+    if (!isCleanString(value.acr)) {
+      return undefined;
+    }
+    authentication.acr = value.acr;
+  }
+
+  if (value.authenticated_at !== undefined) {
+    if (!isCleanString(value.authenticated_at)) {
+      return undefined;
+    }
+
+    const authenticatedAt = new Date(value.authenticated_at);
+    if (Number.isNaN(authenticatedAt.getTime())) {
+      return undefined;
+    }
+
+    authentication.authenticated_at = value.authenticated_at;
+  }
+
+  return authentication;
+}
+
+export function normalizePasswordVerifierIdentityResult(
+  data: unknown
+): PasswordVerifierIdentityResult | undefined {
+  if (!isPlainObject(data) || !isCleanString(data.subject) || !isPlainObject(data.context)) {
+    return undefined;
+  }
+
+  const identity = sanitizeNormalizedIdentity(data.context.identity);
+  const authentication = sanitizeNormalizedAuthentication(data.context.authentication);
+
+  if (
+    (data.context.identity !== undefined && identity === undefined) ||
+    (data.context.authentication !== undefined && authentication === undefined)
+  ) {
+    return undefined;
+  }
+
+  if (identity === undefined && authentication === undefined) {
+    return undefined;
+  }
+
+  const context: NormalizedLoginContext = {};
+  if (identity !== undefined) {
+    context.identity = identity;
+  }
+  if (authentication !== undefined) {
+    context.authentication = authentication;
+  }
+
+  return {
+    subject: data.subject,
+    context,
+  };
+}
+
 // Sends username and password to an external credential-verification endpoint
-// and returns the redirect URL that continues the OAuth flow.
-//
-// The external verifier is responsible for calling the Shyntr backend
-// acceptLogin endpoint itself. This function only forwards credentials and
-// follows the resulting redirect — it never constructs identity claims or
-// issues sessions.
+// and returns the normalized identity payload that Shyntr login accept consumes.
 //
 // Security notes:
 //   - password is present only in the outbound request body (JSON.stringify)
 //   - no upstream response body is included in returned error objects
-//   - redirect_to is validated as an absolute http(s) URL before being returned
+//   - verifier response data is schema-checked and copied into a safe envelope
 //   - a bounded AbortController timeout prevents hanging connections
 export async function verifyPasswordCredentials(
   loginURL: string,
   payload: PasswordVerifyPayload
-): Promise<{ data?: RedirectResponse; error?: ApiError }> {
+): Promise<{ data?: PasswordVerifierIdentityResult; error?: ApiError }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), VERIFIER_TIMEOUT_MS);
 
@@ -906,19 +1093,16 @@ export async function verifyPasswordCredentials(
       signal: controller.signal,
     });
 
-    // 3xx: follow Location header redirect
+    // The password verifier must return a normalized identity body. It must not
+    // complete the auth flow or redirect the browser itself.
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location || !isAbsoluteHttpUrl(location)) {
-        return {
-          error: {
-            error: 'login_failed',
-            error_description: 'Password verifier returned a redirect without a valid location.',
-            status_code: response.status,
-          },
-        };
-      }
-      return { data: { redirect_to: location } };
+      return {
+        error: {
+          error: 'login_failed',
+          error_description: 'Password verifier returned an unsupported redirect response.',
+          status_code: response.status,
+        },
+      };
     }
 
     // 400 / 401 / 403: invalid credentials — do not leak status details upstream
@@ -941,7 +1125,7 @@ export async function verifyPasswordCredentials(
       };
     }
 
-    // 2xx: parse JSON for redirect_to
+    // 2xx: parse JSON for normalized identity data
     let data: unknown = null;
     try {
       data = await response.json();
@@ -955,17 +1139,15 @@ export async function verifyPasswordCredentials(
       };
     }
 
-    if (typeof data === 'object' && data !== null) {
-      const redirectTo = (data as Record<string, unknown>).redirect_to;
-      if (typeof redirectTo === 'string' && isAbsoluteHttpUrl(redirectTo)) {
-        return { data: { redirect_to: redirectTo } };
-      }
+    const normalized = normalizePasswordVerifierIdentityResult(data);
+    if (normalized) {
+      return { data: normalized };
     }
 
     return {
       error: {
         error: 'login_failed',
-        error_description: 'Password verifier did not return a valid redirect target.',
+        error_description: 'Password verifier did not return a valid identity result.',
         status_code: response.status,
       },
     };
