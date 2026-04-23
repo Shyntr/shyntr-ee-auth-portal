@@ -4,18 +4,13 @@ import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import {
   acceptConsent,
-  acceptLogin,
+  isAllowedAuthUrl,
   loginWithLDAP,
   rejectConsent,
   rejectLogin,
+  verifyPasswordCredentials,
   AcceptConsentPayload,
-  AcceptLoginPayload,
 } from '@/lib/shyntr-api';
-
-const MOCK_USERS: Record<string, { password: string; userId: string }> = {
-  admin: { password: 'password', userId: 'user-admin-001' },
-  demo: { password: 'demo123', userId: 'user-demo-002' },
-};
 
 export interface LoginFormState {
   error?: string;
@@ -43,9 +38,13 @@ export async function handleLoginSubmit(
 ): Promise<LoginFormState> {
   const methodType = String(formData.get('auth_method_type') || 'password');
   const loginURL = String(formData.get('auth_method_login_url') || '');
-  const username = String(formData.get('username') || '');
+  const username = String(formData.get('username') || '').trim();
   const password = String(formData.get('password') || '');
   const remember = formData.get('remember') === 'on';
+
+  if (!loginChallenge || loginChallenge.trim() === '') {
+    return { error: 'login_failed' };
+  }
 
   if (username === '' || password === '') {
     return { error: 'Username and password are required.' };
@@ -73,36 +72,40 @@ export async function handleLoginSubmit(
     return { error: 'No redirect URL received.' };
   }
 
-  const user = MOCK_USERS[username];
-  if (!user || user.password !== password) {
-    return { error: 'invalid_credentials' };
-  }
+  if (methodType === 'password') {
+    if (loginURL === '') {
+      return { error: 'login_unavailable' };
+    }
 
-  const payload: AcceptLoginPayload = {
-    subject: user.userId,
-    remember,
-    remember_for: remember ? 3600 : 0,
-    context: {
+    if (!isAllowedAuthUrl(loginURL)) {
+      return { error: 'login_failed' };
+    }
+
+    const result = await verifyPasswordCredentials(loginURL, {
+      login_challenge: loginChallenge,
       username,
-      login_claims: {
-        email: `${username}@shyntr.local`,
-        department: 'Engineering',
-        employee_id: user.userId,
-      },
-    },
-  };
+      password,
+    });
 
-  const result = await acceptLogin(loginChallenge, payload);
+    if (result.error) {
+      if (result.error.error === 'invalid_credentials') {
+        return { error: 'invalid_credentials' };
+      }
+      return { error: 'login_failed' };
+    }
 
-  if (result.error) {
-    return { error: result.error.error_description || 'Login failed.' };
+    if (result.data?.redirect_to) {
+      redirect(result.data.redirect_to);
+    }
+
+    return { error: 'login_failed' };
   }
 
-  if (result.data?.redirect_to) {
-    redirect(result.data.redirect_to);
-  }
+  // remember is used only in the local AcceptLoginPayload path which has been
+  // removed. Suppress the unused-variable warning by referencing it here.
+  void remember;
 
-  return { error: 'No redirect URL received.' };
+  return { error: 'login_failed' };
 }
 
 export async function handleLoginCancel(loginChallenge: string): Promise<void> {

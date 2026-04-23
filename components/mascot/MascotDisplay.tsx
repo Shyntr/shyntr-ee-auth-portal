@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function MascotDisplay({ password = false } : {password: boolean}) {
     return (
-        <div className="relative md:w-40 md:h-40 sm:w-28 sm:h-28 mx-auto select-none">
+        <div className="relative md:w-32 md:h-32 sm:w-28 sm:h-28 max-h-32 max-w-32 select-none">
             <AnimatePresence mode="wait">
                 <motion.img
                     key={password ? 'password' : 'idle'}

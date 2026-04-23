@@ -24,8 +24,7 @@
     "consentPage": "İzin Sayfası",
     "consentDesc": "İzin onay akışı",
     "logoutPage": "Çıkış Sayfası",
-    "logoutDesc": "Oturum sonlandırma",
-    "demoCredentials": "Demo Kimlik Bilgileri"
+    "logoutDesc": "Oturum sonlandırma"
   },
   "login": {
     "signInWith": "{name} ile Oturum aç",
@@ -41,6 +40,8 @@
     "cancel": "İptal",
     "signingIn": "Giriş yapılıyor...",
     "invalidCredentials": "Geçersiz kullanıcı adı veya şifre",
+    "loginFailed": "Bir hata oluştu. Lütfen tekrar deneyin.",
+    "loginUnavailable": "Giriş geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
     "enterUsername": "Kullanıcı adınızı girin",
     "enterPassword": "Şifrenizi girin",
     "noMethods": "Bu uygulama/tenant için tanımlanmış bir giriş yöntemi bulunamadı."

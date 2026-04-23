@@ -72,6 +72,12 @@ export interface LDAPLoginPayload {
   password: string;
 }
 
+export interface PasswordVerifyPayload {
+  login_challenge: string;
+  username: string;
+  password: string;
+}
+
 export interface AcceptConsentPayload {
   grant_scope: string[];
   grant_audience?: string[];
@@ -384,6 +390,19 @@ function isValidHttpsUrl(value: string): boolean {
   }
 }
 
+// Returns true for absolute http: or https: URLs.
+// Used to validate redirect_to values returned by external verifiers before
+// the portal follows them.
+function isAbsoluteHttpUrl(value: string): boolean {
+  if (!value || value.trim() === '') return false;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 // Darkens a 6-digit hex color by the given factor (default 15 %).
 // Used to derive hover states from a primary color when the backend
 // does not supply a separate hover value.
@@ -575,6 +594,66 @@ function normalizePortalTheme(
       width: normalizeLogoWidth(undefined, DEFAULT_PORTAL_THEME.logo.width),
     },
   };
+}
+
+// Returns true when `url` has an origin (scheme + host + port) that exactly
+// matches one of the trusted backend origins. The trusted set is built from:
+//
+//   1. SHYNTR_INTERNAL_API_URL  — always trusted (required at startup)
+//   2. SHYNTR_PUBLIC_API_URL    — always trusted (required at startup)
+//   3. SHYNTR_AUTH_ALLOWED_ORIGINS — optional, comma-separated list of
+//      additional verifier origins (e.g. "https://auth.example.com").
+//      Whitespace is trimmed, empty entries are ignored, and entries that
+//      are not valid absolute http(s) URLs are silently skipped.
+//
+// SHYNTR_AUTH_ALLOWED_ORIGINS is read at call-time (not module-load-time) so
+// its value can be overridden in tests without reloading the module.
+//
+// The portal uses this to prevent SSRF: the `auth_method_login_url` field
+// arrives via a user-submitted form field and must be validated server-side
+// before any outbound fetch is made. Wildcards are never supported.
+export function isAllowedAuthUrl(url: string): boolean {
+  if (!url || url.trim() === '') return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+  const allowedOrigins = new Set<string>();
+
+  // Default trusted origins (module-level constants, always present)
+  for (const base of [INTERNAL_API_URL, PUBLIC_API_URL]) {
+    if (base) {
+      try {
+        allowedOrigins.add(new URL(base).origin);
+      } catch {
+        // ignore malformed base URL in config
+      }
+    }
+  }
+
+  // Additional origins from SHYNTR_AUTH_ALLOWED_ORIGINS.
+  // Read at call-time so tests can set process.env per test case.
+  const extraRaw = process.env.SHYNTR_AUTH_ALLOWED_ORIGINS ?? '';
+  for (const entry of extraRaw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed === '') continue;
+    try {
+      const extra = new URL(trimmed);
+      if (extra.protocol === 'http:' || extra.protocol === 'https:') {
+        allowedOrigins.add(extra.origin);
+      }
+    } catch {
+      // ignore invalid or non-http(s) entries
+    }
+  }
+
+  return allowedOrigins.has(parsed.origin);
 }
 
 export async function getTenantPortalTheme(tenantId?: string): Promise<PortalTheme> {
@@ -787,5 +866,121 @@ export async function loginWithLDAP(
     };
   } catch (error) {
     return { error: handleApiError(error) };
+  }
+}
+
+// Timeout for outbound password-verifier requests. Kept below the Axios
+// apiClient timeout (10 s) so failures surface before an ambient deadline.
+const VERIFIER_TIMEOUT_MS = 8000;
+
+// Sends username and password to an external credential-verification endpoint
+// and returns the redirect URL that continues the OAuth flow.
+//
+// The external verifier is responsible for calling the Shyntr backend
+// acceptLogin endpoint itself. This function only forwards credentials and
+// follows the resulting redirect — it never constructs identity claims or
+// issues sessions.
+//
+// Security notes:
+//   - password is present only in the outbound request body (JSON.stringify)
+//   - no upstream response body is included in returned error objects
+//   - redirect_to is validated as an absolute http(s) URL before being returned
+//   - a bounded AbortController timeout prevents hanging connections
+export async function verifyPasswordCredentials(
+  loginURL: string,
+  payload: PasswordVerifyPayload
+): Promise<{ data?: RedirectResponse; error?: ApiError }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), VERIFIER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(loginURL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+
+    // 3xx: follow Location header redirect
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location || !isAbsoluteHttpUrl(location)) {
+        return {
+          error: {
+            error: 'login_failed',
+            error_description: 'Password verifier returned a redirect without a valid location.',
+            status_code: response.status,
+          },
+        };
+      }
+      return { data: { redirect_to: location } };
+    }
+
+    // 400 / 401 / 403: invalid credentials — do not leak status details upstream
+    if (response.status === 400 || response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          error: 'invalid_credentials',
+          status_code: response.status,
+        },
+      };
+    }
+
+    // 5xx or other non-2xx: upstream failure — do not include response body
+    if (!response.ok) {
+      return {
+        error: {
+          error: 'login_failed',
+          status_code: response.status,
+        },
+      };
+    }
+
+    // 2xx: parse JSON for redirect_to
+    let data: unknown = null;
+    try {
+      data = await response.json();
+    } catch {
+      return {
+        error: {
+          error: 'login_failed',
+          error_description: 'Password verifier returned an unreadable response.',
+          status_code: response.status,
+        },
+      };
+    }
+
+    if (typeof data === 'object' && data !== null) {
+      const redirectTo = (data as Record<string, unknown>).redirect_to;
+      if (typeof redirectTo === 'string' && isAbsoluteHttpUrl(redirectTo)) {
+        return { data: { redirect_to: redirectTo } };
+      }
+    }
+
+    return {
+      error: {
+        error: 'login_failed',
+        error_description: 'Password verifier did not return a valid redirect target.',
+        status_code: response.status,
+      },
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return {
+        error: {
+          error: 'timeout',
+          error_description: 'Password verifier request timed out.',
+          status_code: 0,
+        },
+      };
+    }
+    return { error: handleApiError(error) };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
