@@ -24,6 +24,24 @@ export interface ConsentFormState {
   success?: boolean;
 }
 
+function getRedirectDiagnosticSummary(redirectTo: string | undefined) {
+  if (!redirectTo) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(redirectTo);
+    return {
+      origin: parsed.origin,
+      pathname: parsed.pathname,
+    };
+  } catch {
+    return {
+      invalid: true,
+    };
+  }
+}
+
 export async function setLocale(locale: string) {
   const cookieStore = await cookies();
   cookieStore.set('locale', locale, {
@@ -100,6 +118,14 @@ export async function handleLoginSubmit(
       return { error: 'login_failed' };
     }
 
+    console.info('Password login accept start', {
+      flow: 'password',
+      has_login_challenge: loginChallenge.trim() !== '',
+      subject: result.data.subject,
+      has_identity_context: result.data.context.identity !== undefined,
+      has_authentication_context: result.data.context.authentication !== undefined,
+    });
+
     const payload: AcceptLoginPayload = {
       subject: result.data.subject,
       remember,
@@ -110,12 +136,43 @@ export async function handleLoginSubmit(
     const acceptResult = await acceptLogin(loginChallenge, payload);
 
     if (acceptResult.error) {
+      console.error('Password login accept failed', {
+        flow: 'password',
+        has_login_challenge: loginChallenge.trim() !== '',
+        subject: result.data.subject,
+        status_code: acceptResult.error.status_code ?? null,
+        backend_error: acceptResult.error.error,
+        backend_error_description: acceptResult.error.error_description ?? null,
+      });
       return { error: 'login_failed' };
     }
+
+    const redirectTo = acceptResult.data?.redirect_to;
+    const hasRedirectTo = typeof redirectTo === 'string' && redirectTo !== '';
+
+    console.info('Password login accept result', {
+      flow: 'password',
+      subject: result.data.subject,
+      has_redirect_to: hasRedirectTo,
+      response_keys:
+        acceptResult.data && typeof acceptResult.data === 'object'
+          ? Object.keys(acceptResult.data)
+          : [],
+      redirect_summary: getRedirectDiagnosticSummary(redirectTo),
+    });
 
     if (acceptResult.data?.redirect_to) {
       redirect(acceptResult.data.redirect_to);
     }
+
+    console.error('Password login accept missing redirect target', {
+      flow: 'password',
+      subject: result.data.subject,
+      response_keys:
+        acceptResult.data && typeof acceptResult.data === 'object'
+          ? Object.keys(acceptResult.data)
+          : [],
+    });
 
     return { error: 'login_failed' };
   }

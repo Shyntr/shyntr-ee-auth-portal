@@ -208,6 +208,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function summarizeDiagnosticValue(value: unknown, depth = 0): unknown {
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number'
+  ) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return value.length > 200 ? `${value.slice(0, 200)}...` : value;
+  }
+
+  if (Array.isArray(value)) {
+    if (depth >= 1) {
+      return { type: 'array', length: value.length };
+    }
+
+    return {
+      type: 'array',
+      length: value.length,
+      sample: value.slice(0, 3).map((item) => summarizeDiagnosticValue(item, depth + 1)),
+    };
+  }
+
+  if (!isRecord(value)) {
+    return typeof value;
+  }
+
+  const entries = Object.entries(value);
+  const summary: Record<string, unknown> = {};
+
+  for (const [key, entryValue] of entries.slice(0, 10)) {
+    summary[key] =
+      depth >= 1
+        ? Array.isArray(entryValue)
+          ? { type: 'array', length: entryValue.length }
+          : isRecord(entryValue)
+          ? { type: 'object', keys: Object.keys(entryValue) }
+          : summarizeDiagnosticValue(entryValue, depth + 1)
+        : summarizeDiagnosticValue(entryValue, depth + 1);
+  }
+
+  if (entries.length > 10) {
+    summary.__truncated__ = entries.length - 10;
+  }
+
+  return summary;
+}
+
 function getNestedValue(
   source: Record<string, unknown> | undefined,
   path: string[]
@@ -714,8 +764,48 @@ export async function acceptLogin(
       params: { login_challenge: loginChallenge },
     });
 
+    const responseData = response.data as unknown;
+    const responseKeys = isRecord(responseData) ? Object.keys(responseData) : [];
+    const redirectTo =
+      isRecord(responseData) && typeof responseData.redirect_to === 'string'
+        ? responseData.redirect_to
+        : undefined;
+
+    console.info('Shyntr acceptLogin transport result', {
+      has_login_challenge: loginChallenge.trim() !== '',
+      status_code: response.status,
+      response_keys: responseKeys,
+      has_redirect_to: typeof redirectTo === 'string' && redirectTo !== '',
+      response_summary: summarizeDiagnosticValue(responseData),
+    });
+
     return { data: response.data };
   } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const responseData = error.response?.data;
+
+      console.error('Shyntr acceptLogin transport error', {
+        has_login_challenge: loginChallenge.trim() !== '',
+        status_code: error.response?.status ?? null,
+        backend_error:
+          isRecord(responseData) && typeof responseData.error === 'string'
+            ? responseData.error
+            : null,
+        backend_error_description:
+          isRecord(responseData) && typeof responseData.error_description === 'string'
+            ? responseData.error_description
+            : null,
+        response_keys: isRecord(responseData) ? Object.keys(responseData) : [],
+        response_summary: summarizeDiagnosticValue(responseData),
+      });
+    } else {
+      console.error('Shyntr acceptLogin transport error', {
+        has_login_challenge: loginChallenge.trim() !== '',
+        error_type: error instanceof Error ? error.name : typeof error,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     return { error: handleApiError(error) };
   }
 }
