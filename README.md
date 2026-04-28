@@ -59,6 +59,40 @@ SHYNTR_INTERNAL_API_URL=http://localhost:7497
 SHYNTR_PUBLIC_API_URL=http://localhost:7496
 ```
 
+## Password Verifier Configuration
+
+Password login uses an external verifier endpoint returned by Shyntr as the password method `login_url`.
+
+The Auth Portal enforces strict outbound allowlisting before it will call that verifier. Outbound password-verifier requests are allowed only when the verifier origin matches one of:
+
+- `SHYNTR_INTERNAL_API_URL`
+- `SHYNTR_PUBLIC_API_URL`
+- `SHYNTR_AUTH_ALLOWED_ORIGINS`
+
+If the verifier origin is not allowlisted, the portal blocks the request and password login fails with:
+
+```json
+{
+  "error": "login_failed"
+}
+```
+
+The verifier origin must be added to `SHYNTR_AUTH_ALLOWED_ORIGINS`.
+
+Example:
+
+```env
+SHYNTR_AUTH_ALLOWED_ORIGINS=http://localhost:7499
+```
+
+If you use multiple verifier origins, provide a comma-separated list of exact origins:
+
+```env
+SHYNTR_AUTH_ALLOWED_ORIGINS=http://localhost:7499,https://verifier.internal:8443
+```
+
+Only exact `http` or `https` origin matches are accepted. Wildcards are not supported.
+
 ### Install and run
 
 ```bash

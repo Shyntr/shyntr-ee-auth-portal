@@ -24,8 +24,7 @@
     "consentPage": "Consent Page",
     "consentDesc": "Permission grant flow",
     "logoutPage": "Logout Page",
-    "logoutDesc": "Session termination",
-    "demoCredentials": "Demo Credentials"
+    "logoutDesc": "Session termination"
   },
   "login": {
     "signInWith": "Sign in with {name}",
@@ -41,6 +40,8 @@
     "cancel": "Cancel",
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid username or password",
+    "loginFailed": "An error occurred. Please try again.",
+    "loginUnavailable": "Login is temporarily unavailable. Please try again later.",
     "enterUsername": "Enter your username",
     "enterPassword": "Enter your password",
     "noMethods": "No defined login methods are found for application."

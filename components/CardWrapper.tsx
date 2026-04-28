@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Footer } from './Footer';
 import MascotDisplay from '@/components/mascot/MascotDisplay';
+import { getResponsiveLogoStyle } from '@/lib/logo-style';
 import { DEFAULT_PORTAL_THEME } from '@/lib/portal-theme';
 import type { PortalTheme } from '@/lib/portal-theme';
 
@@ -69,8 +70,8 @@ export function CardWrapper({
               <img
                 src={theme.logo.imageUrl}
                 alt={theme.logo.alt}
-                className="auth-logo-image h-auto object-contain"
-                style={{ width: `${theme.logo.width}px` }}
+                className="auth-logo-image h-auto max-w-full object-contain"
+                style={getResponsiveLogoStyle(theme.logo.width)}
               />
             ) : (
               <div className="auth-logo-fallback flex justify-center bg-gradient-to-b from-white-30/50 to-transparent">

@@ -3,19 +3,16 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import {
-  acceptConsent,
   acceptLogin,
+  acceptConsent,
+  isAllowedAuthUrl,
   loginWithLDAP,
   rejectConsent,
   rejectLogin,
-  AcceptConsentPayload,
+  verifyPasswordCredentials,
   AcceptLoginPayload,
+  AcceptConsentPayload,
 } from '@/lib/shyntr-api';
-
-const MOCK_USERS: Record<string, { password: string; userId: string }> = {
-  admin: { password: 'password', userId: 'user-admin-001' },
-  demo: { password: 'demo123', userId: 'user-demo-002' },
-};
 
 export interface LoginFormState {
   error?: string;
@@ -25,6 +22,24 @@ export interface LoginFormState {
 export interface ConsentFormState {
   error?: string;
   success?: boolean;
+}
+
+function getRedirectDiagnosticSummary(redirectTo: string | undefined) {
+  if (!redirectTo) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(redirectTo);
+    return {
+      origin: parsed.origin,
+      pathname: parsed.pathname,
+    };
+  } catch {
+    return {
+      invalid: true,
+    };
+  }
 }
 
 export async function setLocale(locale: string) {
@@ -43,9 +58,13 @@ export async function handleLoginSubmit(
 ): Promise<LoginFormState> {
   const methodType = String(formData.get('auth_method_type') || 'password');
   const loginURL = String(formData.get('auth_method_login_url') || '');
-  const username = String(formData.get('username') || '');
+  const username = String(formData.get('username') || '').trim();
   const password = String(formData.get('password') || '');
   const remember = formData.get('remember') === 'on';
+
+  if (!loginChallenge || loginChallenge.trim() === '') {
+    return { error: 'login_failed' };
+  }
 
   if (username === '' || password === '') {
     return { error: 'Username and password are required.' };
@@ -73,36 +92,92 @@ export async function handleLoginSubmit(
     return { error: 'No redirect URL received.' };
   }
 
-  const user = MOCK_USERS[username];
-  if (!user || user.password !== password) {
-    return { error: 'invalid_credentials' };
-  }
+  if (methodType === 'password') {
+    if (loginURL === '') {
+      return { error: 'login_unavailable' };
+    }
 
-  const payload: AcceptLoginPayload = {
-    subject: user.userId,
-    remember,
-    remember_for: remember ? 3600 : 0,
-    context: {
+    if (!isAllowedAuthUrl(loginURL)) {
+      return { error: 'login_failed' };
+    }
+
+    const result = await verifyPasswordCredentials(loginURL, {
+      login_challenge: loginChallenge,
       username,
-      login_claims: {
-        email: `${username}@shyntr.local`,
-        department: 'Engineering',
-        employee_id: user.userId,
-      },
-    },
-  };
+      password,
+    });
 
-  const result = await acceptLogin(loginChallenge, payload);
+    if (result.error) {
+      if (result.error.error === 'invalid_credentials') {
+        return { error: 'invalid_credentials' };
+      }
+      return { error: 'login_failed' };
+    }
 
-  if (result.error) {
-    return { error: result.error.error_description || 'Login failed.' };
+    if (!result.data) {
+      return { error: 'login_failed' };
+    }
+
+    console.info('Password login accept start', {
+      flow: 'password',
+      has_login_challenge: loginChallenge.trim() !== '',
+      subject: result.data.subject,
+      has_identity_context: result.data.context.identity !== undefined,
+      has_authentication_context: result.data.context.authentication !== undefined,
+    });
+
+    const payload: AcceptLoginPayload = {
+      subject: result.data.subject,
+      remember,
+      remember_for: remember ? 3600 : 0,
+      context: result.data.context,
+    };
+
+    const acceptResult = await acceptLogin(loginChallenge, payload);
+
+    if (acceptResult.error) {
+      console.error('Password login accept failed', {
+        flow: 'password',
+        has_login_challenge: loginChallenge.trim() !== '',
+        subject: result.data.subject,
+        status_code: acceptResult.error.status_code ?? null,
+        backend_error: acceptResult.error.error,
+        backend_error_description: acceptResult.error.error_description ?? null,
+      });
+      return { error: 'login_failed' };
+    }
+
+    const redirectTo = acceptResult.data?.redirect_to;
+    const hasRedirectTo = typeof redirectTo === 'string' && redirectTo !== '';
+
+    console.info('Password login accept result', {
+      flow: 'password',
+      subject: result.data.subject,
+      has_redirect_to: hasRedirectTo,
+      response_keys:
+        acceptResult.data && typeof acceptResult.data === 'object'
+          ? Object.keys(acceptResult.data)
+          : [],
+      redirect_summary: getRedirectDiagnosticSummary(redirectTo),
+    });
+
+    if (acceptResult.data?.redirect_to) {
+      redirect(acceptResult.data.redirect_to);
+    }
+
+    console.error('Password login accept missing redirect target', {
+      flow: 'password',
+      subject: result.data.subject,
+      response_keys:
+        acceptResult.data && typeof acceptResult.data === 'object'
+          ? Object.keys(acceptResult.data)
+          : [],
+    });
+
+    return { error: 'login_failed' };
   }
 
-  if (result.data?.redirect_to) {
-    redirect(result.data.redirect_to);
-  }
-
-  return { error: 'No redirect URL received.' };
+  return { error: 'login_failed' };
 }
 
 export async function handleLoginCancel(loginChallenge: string): Promise<void> {
